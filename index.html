@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>تکالیف ۹۰۳</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Extra small custom tweaks */
+    .glass {
+      backdrop-filter: blur(6px) saturate(120%);
+      background-color: rgba(17,24,39,0.45);
+    }
+    .task-done { text-decoration: line-through; opacity: .6; }
+    /* make date pill stand out */
+    .date-pill { font-weight:600; padding:4px 8px; border-radius:9999px; font-size:12px; }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 text-slate-100 antialiased">
+  <div class="max-w-4xl mx-auto p-6">
+    <header class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-3xl font-extrabold tracking-tight">تکالیف ۹۰۳</h1>
+        <p class="text-slate-400 text-sm mt-1">سایتی ساده و مدرن برای مدیریت تکالیف — فقط با یک فایل</p>
+      </div>
+      <div class="flex gap-2 items-center">
+        <button id="toggle-edit" class="px-3 py-2 rounded-lg glass border border-slate-700 text-sm">حالت ویرایش: خاموش</button>
+        <button id="export-btn" class="px-3 py-2 rounded-lg bg-slate-700 text-sm hover:bg-slate-600">صدور JSON</button>
+        <input id="import-file" type="file" accept="application/json" class="hidden" />
+        <button id="import-btn" class="px-3 py-2 rounded-lg glass border border-slate-700 text-sm">ورود از فایل</button>
+      </div>
+    </header>
+
+    <main class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <!-- Left: form -->
+      <section class="md:col-span-1 glass p-4 rounded-2xl shadow-md">
+        <h2 class="font-semibold text-lg mb-3">اضافه کردن تکلیف</h2>
+        <form id="task-form" class="space-y-3">
+          <div>
+            <label class="text-sm text-slate-300">عنوان</label>
+            <input id="title" required class="w-full mt-1 p-2 rounded-md bg-slate-800 border border-slate-700 outline-none" />
+          </div>
+          <div>
+            <label class="text-sm text-slate-300">توضیحات</label>
+            <textarea id="desc" rows="3" class="w-full mt-1 p-2 rounded-md bg-slate-800 border border-slate-700 outline-none"></textarea>
+          </div>
+          <div>
+            <label class="text-sm text-slate-300">تاریخ تحویل</label>
+            <input id="due" type="datetime-local" class="w-full mt-1 p-2 rounded-md bg-slate-800 border border-slate-700 outline-none" />
+          </div>
+          <div class="flex gap-2">
+            <button id="add-btn" class="w-full px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500">افزودن</button>
+          </div>
+          <p id="edit-hint" class="text-xs text-slate-400">برای افزودن/ویرایش باید حالت ویرایش روشن باشد.</p>
+        </form>
+
+        <hr class="my-4 border-slate-700" />
+
+        <div>
+          <h3 class="text-sm font-medium text-slate-300 mb-2">فیلترها</h3>
+          <div class="flex gap-2">
+            <select id="filter" class="w-full p-2 rounded-md bg-slate-800 border border-slate-700">
+              <option value="all">همه</option>
+              <option value="upcoming">نزدیک به موعد (۳ روز)</option>
+              <option value="done">انجام‌شده</option>
+              <option value="overdue">معوق</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: tasks list -->
+      <section class="md:col-span-2">
+        <div class="glass p-4 rounded-2xl shadow-md mb-4 flex items-center justify-between">
+          <div>
+            <p class="text-slate-200 font-medium" id="stats">تعداد تکالیف: 0 — انجام‌شده: 0</p>
+          </div>
+          <div class="text-sm text-slate-400">نسخهٔ تک‌فایل • قابل آپلود در GitHub Pages</div>
+        </div>
+
+        <div id="tasks-container" class="space-y-3">
+          <!-- tasks injected here -->
+        </div>
+
+      </section>
+    </main>
+
+    <footer class="mt-8 text-center text-slate-500 text-sm">
+      <p>برای آپلود در GitHub Pages: فقط این فایل را در ریپوی خود قرار بده و در تنظیمات GitHub Pages شاخهٔ main را انتخاب کن.</p>
+    </footer>
+  </div>
+
+<script>
+/* تکالیف 903 — single-file app */
+const STORAGE_KEY = 'takalif_903_tasks_v1';
+let tasks = [];
+let editMode = false;
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+
+function save() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+  render();
+}
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    tasks = raw ? JSON.parse(raw) : [];
+  } catch(e) {
+    tasks = [];
+  }
+}
+
+function formatDateInput(dt) {
+  if(!dt) return '';
+  const d = new Date(dt);
+  return d.toLocaleString('fa-IR', { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+
+function isOverdue(t) {
+  return t.due && new Date(t.due) < new Date() && !t.done;
+}
+
+function isUpcoming(t) {
+  if(!t.due) return false;
+  const diff = new Date(t.due) - new Date();
+  return diff > 0 && diff <= 3*24*60*60*1000; // 3 days
+}
+
+function render() {
+  const container = document.getElementById('tasks-container');
+  container.innerHTML = '';
+  const filter = document.getElementById('filter').value;
+  let shown = tasks.slice().sort((a,b) => new Date(a.due || 0) - new Date(b.due || 0));
+  if(filter === 'done') shown = shown.filter(t => t.done);
+  if(filter === 'overdue') shown = shown.filter(isOverdue);
+  if(filter === 'upcoming') shown = shown.filter(isUpcoming);
+
+  let doneCount = tasks.filter(t => t.done).length;
+  document.getElementById('stats').innerText = `تعداد تکالیف: ${tasks.length} — انجام‌شده: ${doneCount}`;
+
+  if(shown.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'glass p-4 rounded-lg text-slate-400';
+    empty.innerText = 'تکلیفی وجود ندارد';
+    container.appendChild(empty);
+    return;
+  }
+
+  for(const t of shown) {
+    const card = document.createElement('div');
+    card.className = 'p-4 glass rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3';
+    if(t.done) card.classList.add('opacity-80');
+
+    const left = document.createElement('div');
+    left.className = 'flex items-start gap-3';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.checked = !!t.done;
+    chk.className = 'w-5 h-5 mt-1';
+    chk.onchange = ()=> {
+      t.done = chk.checked;
+      t.updated = new Date().toISOString();
+      save();
+    };
+    left.appendChild(chk);
+
+    const info = document.createElement('div');
+    const title = document.createElement('div');
+    title.className = 'font-semibold text-lg';
+    if(t.done) title.classList.add('task-done');
+    title.innerText = t.title || '(بدون عنوان)';
+    info.appendChild(title);
+
+    if(t.desc) {
+      const p = document.createElement('div');
+      p.className = 'text-sm text-slate-300 mt-1';
+      p.innerText = t.desc;
+      info.appendChild(p);
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'flex gap-2 items-center mt-2 flex-wrap';
+    if(t.due) {
+      const pill = document.createElement('span');
+      pill.className = 'date-pill bg-slate-700 text-slate-200';
+      pill.innerText = formatDateInput(t.due);
+      if(isOverdue(t)) pill.classList.add('bg-rose-600');
+      else if(isUpcoming(t)) pill.classList.add('bg-amber-600 text-slate-900');
+      meta.appendChild(pill);
+    }
+    info.appendChild(meta);
+
+    left.appendChild(info);
+    card.appendChild(left);
+
+    const actions = document.createElement('div');
+    actions.className = 'flex items-center gap-2';
+
+    // Reminder button
+    const remindBtn = document.createElement('button');
+    remindBtn.innerText = 'یادآوری';
+    remindBtn.className = 'px-3 py-1 rounded-md glass text-sm';
+    remindBtn.onclick = ()=> {
+      if(!t.due) return alert('این تکلیف تاریخ ندارد.');
+      const when = new Date(t.due);
+      const diff = when - new Date();
+      if(diff <= 0) return alert('تاریخ گذشته است.');
+      scheduleNotification(t);
+      alert('یادآوری زمان‌بندی شد (در زمان‌بندی صفحه باید باز باشد یا نوتیفیکیشن فعال باشد).');
+    };
+    actions.appendChild(remindBtn);
+
+    // Edit & Delete (only when editMode)
+    const editBtn = document.createElement('button');
+    editBtn.innerText = 'ویرایش';
+    editBtn.className = 'px-3 py-1 rounded-md bg-slate-700 text-sm';
+    editBtn.onclick = ()=> {
+      if(!editMode) return alert('ابتدا حالت ویرایش را روشن کنید.');
+      openEditModal(t);
+    };
+    actions.appendChild(editBtn);
+
+    const delBtn = document.createElement('button');
+    delBtn.innerText = 'حذف';
+    delBtn.className = 'px-3 py-1 rounded-md bg-rose-600 text-sm';
+    delBtn.onclick = ()=> {
+      if(!editMode) return alert('ابتدا حالت ویرایش را روشن کنید.');
+      if(confirm('آیا مطمئنی حذف شود؟')) {
+        tasks = tasks.filter(x => x.id !== t.id);
+        save();
+      }
+    };
+    actions.appendChild(delBtn);
+
+    card.appendChild(actions);
+    container.appendChild(card);
+  }
+}
+
+/* Edit modal via prompt (simple) */
+function openEditModal(t) {
+  const title = prompt('عنوان', t.title);
+  if(title === null) return;
+  const desc = prompt('توضیحات', t.desc || '');
+  if(desc === null) return;
+  let due = prompt('تاریخ و زمان (فرمت: YYYY-MM-DDTHH:MM) — خالی بگذار برای حذف', t.due ? t.due.slice(0,16) : '');
+  if(due === null) return;
+  if(due === '') due = null;
+  t.title = title;
+  t.desc = desc;
+  t.due = due ? new Date(due).toISOString() : null;
+  t.updated = new Date().toISOString();
+  save();
+}
+
+/* Scheduling simple notifications (works if page open and notification permission granted) */
+function scheduleNotification(task) {
+  if(!('Notification' in window)) return;
+  if(Notification.permission !== 'granted') {
+    Notification.requestPermission().then(p => {
+      if(p === 'granted') scheduleNotification(task);
+    });
+    return;
+  }
+  // schedule a setTimeout (only while page is open)
+  const when = new Date(task.due);
+  const diff = when - new Date();
+  if(diff <= 0) return;
+  setTimeout(()=> {
+    new Notification('تکلیف رسید: ' + (task.title || 'بدون عنوان'), {
+      body: task.desc || 'تکلیف وقتش شده',
+      tag: task.id
+    });
+  }, diff);
+}
+
+/* Auto-check for upcoming/overdue and optionally notify */
+function periodicCheck() {
+  const now = new Date();
+  for(const t of tasks) {
+    if(!t.notified && t.due) {
+      const diff = new Date(t.due) - now;
+      // notify at due time (if page open)
+      if(diff <= 0 && !t.done) {
+        if(Notification.permission === 'granted') {
+          new Notification('مهلت تکلیف رسید: ' + (t.title || 'بدون عنوان'), { body: t.desc || ''});
+        }
+        t.notified = true;
+        save();
+      }
+    }
+  }
+}
+
+/* UI wiring */
+document.getElementById('task-form').addEventListener('submit', e => {
+  e.preventDefault();
+  if(!editMode) return alert('برای افزودن باید حالت ویرایش روشن باشد.');
+  const title = document.getElementById('title').value.trim();
+  const desc = document.getElementById('desc').value.trim();
+  const dueVal = document.getElementById('due').value;
+  const due = dueVal ? new Date(dueVal).toISOString() : null;
+  const t = { id: uid(), title, desc, due, done:false, created: new Date().toISOString() };
+  tasks.push(t);
+  document.getElementById('task-form').reset();
+  save();
+});
+
+document.getElementById('filter').addEventListener('change', render);
+
+document.getElementById('toggle-edit').addEventListener('click', ()=> {
+  editMode = !editMode;
+  document.getElementById('toggle-edit').innerText = 'حالت ویرایش: ' + (editMode ? 'روشن' : 'خاموش');
+  document.getElementById('edit-hint').style.display = editMode ? 'none' : 'block';
+  // visually indicate edit mode
+  if(editMode) document.getElementById('toggle-edit').classList.add('bg-amber-500','text-slate-900');
+  else document.getElementById('toggle-edit').classList.remove('bg-amber-500','text-slate-900');
+});
+
+document.getElementById('export-btn').addEventListener('click', ()=> {
+  const dataStr = JSON.stringify(tasks, null, 2);
+  const blob = new Blob([dataStr], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'takalif_903_export.json';
+  document.body.appendChild(a); a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('import-btn').addEventListener('click', ()=> {
+  document.getElementById('import-file').click();
+});
+document.getElementById('import-file').addEventListener('change', (ev)=> {
+  const f = ev.target.files[0];
+  if(!f) return;
+  const reader = new FileReader();
+  reader.onload = ()=> {
+    try {
+      const arr = JSON.parse(reader.result);
+      if(!Array.isArray(arr)) throw 'فرمت نامعتبر';
+      tasks = arr;
+      save();
+      alert('ورود با موفقیت انجام شد.');
+    } catch(e) {
+      alert('خطا در بارگذاری فایل: ' + e);
+    }
+  };
+  reader.readAsText(f);
+});
+
+/* load + initial render */
+load();
+render();
+
+/* periodic checks */
+setInterval(periodicCheck, 30*1000); // هر 30 ثانیه بررسی کن
+
+/* Try to schedule notifications for tasks with future due dates (if page opened now) */
+for(const t of tasks) {
+  if(t.due && !t.done) {
+    const diff = new Date(t.due) - new Date();
+    if(diff > 0 && diff < 7*24*60*60*1000) { // schedule only if within 7 days to avoid huge timers
+      // nothing if Notification permission not granted
+      if(Notification.permission === 'granted') scheduleNotification(t);
+    }
+  }
+}
+
+/* Helpful: export simple README for GitHub Pages in alert */
+console.log('تکالیف 903 بارگذاری شد — این فایل را داخل یک ریپو قرار بده و GitHub Pages روشن کن.');
+</script>
+</body>
+</html>
